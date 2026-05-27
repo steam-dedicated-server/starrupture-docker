@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Namespace is created out-of-band via `kubectl create namespace starrupture`
+# (see k8s/README.md). Keeping it as a `namespace:` directive here means
+# kustomize injects it into every resource without needing a Namespace
+# manifest in this bundle.
+namespace: starrupture
+
+resources:
+  - pvc.yaml
+  - install-job.yaml
+  - deployment.yaml
+  - backup-cronjob.yaml
+  # secret.yaml is git-ignored — `kubectl apply -f secret.yaml` manually
+  # after copying secret.example.yaml. See k8s/README.md.
+
+images:
+  - name: ghcr.io/steam-dedicated-server/starrupture-docker
+    newTag: latest
+
+commonLabels:
+  app.kubernetes.io/name: starrupture
+  app.kubernetes.io/managed-by: kustomize

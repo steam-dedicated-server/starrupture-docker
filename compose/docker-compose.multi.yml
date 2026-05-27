@@ -1,0 +1,108 @@
+# ============================================================
+# Starrupture — multi-server compose (multiple shards on one host)
+# ------------------------------------------------------------
+# Each `server-NN` service runs on a distinct game + query port
+# pair. All share the same persistent volume — the install/update
+# happens once via the `maintenance` services.
+#
+# NOTE: Starrupture is UE5 + Wine, so each shard needs notable
+# RAM headroom. Default below assumes a beefy host (16+ vCPU /
+# 32+ GB RAM). Adjust per shard if running on a smaller node.
+# ============================================================
+
+x-image: &image
+  image: ghcr.io/steam-dedicated-server/starrupture-docker:latest
+
+x-common: &common
+  <<: *image
+  restart: unless-stopped
+  stop_grace_period: 60s
+  init: false
+  security_opt:
+    - seccomp:unconfined
+  ulimits:
+    nofile: { soft: 1048576, hard: 1048576 }
+    nproc: 65535
+  volumes:
+    - starrupture-data:/mnt/steam
+  tmpfs:
+    - /tmp:size=512m
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+x-base-env: &base-env
+  USE_DSSETTINGS:     "true"
+  SAVE_GAME_INTERVAL: "300"
+  START_NEW_GAME:     "false"
+  LOAD_SAVED_GAME:    "true"
+  STEAM_USER:         "anonymous"
+
+services:
+  install:
+    <<: *common
+    profiles: ["maintenance"]
+    restart: "no"
+    command: ["install"]
+    environment: *base-env
+
+  update:
+    <<: *common
+    profiles: ["maintenance"]
+    restart: "no"
+    command: ["update"]
+    environment: *base-env
+
+  server-01:
+    <<: *common
+    command: ["run"]
+    environment:
+      <<: *base-env
+      SERVER_NAME:       "starrupture-01"
+      SERVER_PORT:       "7777"
+      SERVER_QUERY_PORT: "27015"
+      SESSION_NAME:      "StarRupture-01"
+      SAVE_GAME_NAME:    "AutoSave0.sav"
+      WINEPREFIX:        "/mnt/steam/.wine-01"
+    ports:
+      - "7777:7777/udp"
+      - "7777:7777/tcp"
+      - "27015:27015/udp"
+    deploy:
+      resources:
+        limits: { cpus: "4.0", memory: 12G }
+    healthcheck:
+      test: ["CMD", "python3", "/opt/starrupture/healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 300s
+
+  server-02:
+    <<: *common
+    command: ["run"]
+    environment:
+      <<: *base-env
+      SERVER_NAME:       "starrupture-02"
+      SERVER_PORT:       "7778"
+      SERVER_QUERY_PORT: "27016"
+      SESSION_NAME:      "StarRupture-02"
+      SAVE_GAME_NAME:    "AutoSave0.sav"
+      WINEPREFIX:        "/mnt/steam/.wine-02"
+    ports:
+      - "7778:7778/udp"
+      - "7778:7778/tcp"
+      - "27016:27016/udp"
+    deploy:
+      resources:
+        limits: { cpus: "4.0", memory: 12G }
+    healthcheck:
+      test: ["CMD", "python3", "/opt/starrupture/healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 300s
+
+volumes:
+  starrupture-data:
+    driver: local

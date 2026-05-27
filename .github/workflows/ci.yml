@@ -1,0 +1,74 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  # Opt JS actions into Node.js 24 ahead of the June 2026 cutover so
+  # we don't hit a forced-upgrade surprise. Safe to remove once all
+  # referenced actions ship Node 24-native releases.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: ./scripts
+          additional_files: scripts/star
+      - name: hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: docker/Dockerfile
+      - name: yamllint
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          config_data: |
+            extends: default
+            rules:
+              line-length:
+                max: 140
+              document-start: disable
+              comments:
+                min-spaces-from-content: 1
+              # Allow inline maps written as `{ a: 1, b: 2 }` (a common
+              # k8s/compose style) and column-aligned keys/values.
+              braces:
+                min-spaces-inside: 0
+                max-spaces-inside: 1
+              brackets:
+                min-spaces-inside: 0
+                max-spaces-inside: 1
+              colons:
+                max-spaces-before: 0
+                max-spaces-after: -1
+              commas:
+                max-spaces-before: 0
+                min-spaces-after: 1
+                max-spaces-after: -1
+
+  build:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          load: true
+          tags: starrupture:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test — `star version`
+        run: docker run --rm starrupture:ci version
+      - name: Smoke test — `star help`
+        run: docker run --rm starrupture:ci help

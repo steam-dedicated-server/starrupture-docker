@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# star — Starrupture dedicated server CLI
+#
+# Single dispatcher used both in-container and on bare metal.
+# Sources libraries from ./lib and config from ../config.
+
+set -euo pipefail
+IFS=$'\n\t'
+
+readonly STAR_VERSION="0.1.0"
+
+STAR_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly STAR_ROOT
+readonly STAR_LIB="$STAR_ROOT/scripts/lib"
+readonly STAR_CONFIG_DIR="$STAR_ROOT/config"
+readonly STAR_HEALTHCHECK="$STAR_ROOT/healthcheck.py"
+
+# shellcheck source=lib/common.sh
+. "$STAR_LIB/common.sh"
+# shellcheck source=lib/config.sh
+. "$STAR_LIB/config.sh"
+# shellcheck source=lib/steam.sh
+. "$STAR_LIB/steam.sh"
+# shellcheck source=lib/server.sh
+. "$STAR_LIB/server.sh"
+# shellcheck source=lib/backup.sh
+. "$STAR_LIB/backup.sh"
+
+star::config::load
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  install)         star::steam::install   "$@" ;;
+  update)          star::steam::update    "$@" ;;
+  validate)        star::steam::validate  "$@" ;;
+  login)           star::steam::login     "$@" ;;
+  run|start)       star::server::run      "$@" ;;
+  backup)          star::backup::create   "$@" ;;
+  health)          exec python3 "$STAR_HEALTHCHECK" "$@" ;;
+  config)          star::config::print ;;
+  shell)           exec bash -i ;;
+  version|-v)      echo "star ${STAR_VERSION}" ;;
+  help|-h|--help)  star::help ;;
+  *)
+    star::log::error "Unknown command: $cmd"
+    star::help >&2
+    exit 64
+    ;;
+esac

@@ -1,0 +1,26 @@
+# user config
+config/server.env
+.env
+.env.local
+
+# data
+data/
+backups/
+*.tar.gz
+
+# kubernetes secrets (rendered from secret.example.yaml)
+k8s/secret.yaml
+
+# editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Claude Code local config (per-user). Blueprint docs under
+# .claude/blueprint/ are intentionally tracked.
+.claude/settings.local.json
+
+# os
+.DS_Store
+Thumbs.db

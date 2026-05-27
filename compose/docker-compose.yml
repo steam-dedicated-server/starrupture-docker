@@ -1,0 +1,119 @@
+# ============================================================
+# Starrupture — single-server production compose
+# ------------------------------------------------------------
+# Tuned for a small-to-mid VPS: ~4 vCPU / 8 GB RAM / 60 GB SSD.
+# Starrupture is a UE5 title running under Wine, so RAM/CPU
+# headroom matters more than for the UE4-era games.
+#
+# Quick start:
+#   1. Edit the <REPLACE_*> placeholders in the `environment` block
+#      (or use an .env file at compose dir).
+#   2. docker compose --profile maintenance run --rm install
+#   3. docker compose up -d server
+#   4. docker compose logs -f server
+#
+# First boot (see README "First boot"):
+#   set START_NEW_GAME=true + LOAD_SAVED_GAME=false, start the server,
+#   join with a client to create a world, then flip back to false/true.
+#
+# Day-to-day:
+#   docker compose --profile maintenance run --rm update
+#   docker compose --profile maintenance run --rm backup
+#   docker compose ps                  # health
+#   docker compose down                # stop
+# ============================================================
+
+x-image: &image
+  image: ghcr.io/steam-dedicated-server/starrupture-docker:latest
+  # To build locally instead:
+  # build:
+  #   context: ..
+  #   dockerfile: docker/Dockerfile
+
+x-common: &common
+  <<: *image
+  restart: unless-stopped
+  stop_grace_period: 60s
+  init: false                           # tini is baked into the image
+  security_opt:
+    - seccomp:unconfined                # steamcmd uses syscalls blocked by the default profile
+  ulimits:
+    nofile:
+      soft: 1048576
+      hard: 1048576
+    nproc: 65535
+  volumes:
+    - starrupture-data:/mnt/steam
+  tmpfs:
+    - /tmp:size=512m                    # UE5 + Wine spill to /tmp; size up vs. UE4
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "5"
+
+x-env: &env
+  # ---- IDENTITY ----
+  SERVER_NAME:        "<REPLACE_SERVER_NAME>"
+  SERVER_PORT:        "7777"
+  SERVER_QUERY_PORT:  "27015"
+  # ---- SESSION ----
+  USE_DSSETTINGS:     "true"
+  SESSION_NAME:       "StarRuptureServer"
+  SAVE_GAME_INTERVAL: "300"
+  START_NEW_GAME:     "false"
+  LOAD_SAVED_GAME:    "true"
+  SAVE_GAME_NAME:     "AutoSave0.sav"
+  # ---- STEAM ----
+  STEAM_USER:         "anonymous"
+
+services:
+  # ----- maintenance (one-shot, --profile maintenance) -----
+  install:
+    <<: *common
+    profiles: ["maintenance"]
+    restart: "no"
+    command: ["install"]
+    environment: *env
+
+  update:
+    <<: *common
+    profiles: ["maintenance"]
+    restart: "no"
+    command: ["update"]
+    environment: *env
+
+  backup:
+    <<: *common
+    profiles: ["maintenance"]
+    restart: "no"
+    command: ["backup"]
+    environment: *env
+
+  # ----- the actual game server -----
+  server:
+    <<: *common
+    command: ["run"]
+    environment: *env
+    ports:
+      - "7777:7777/udp"
+      - "7777:7777/tcp"
+      - "27015:27015/udp"
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 12G
+        reservations:
+          cpus: "2.0"
+          memory: 6G
+    healthcheck:
+      test: ["CMD", "python3", "/opt/starrupture/healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 300s
+
+volumes:
+  starrupture-data:
+    driver: local

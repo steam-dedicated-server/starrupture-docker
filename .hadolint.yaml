@@ -1,0 +1,6 @@
+ignored:
+  - DL3008    # pin apt versions (not pinning Ubuntu's curated set)
+  - DL3009    # delete apt lists (we use cache mounts instead)
+trustedRegistries:
+  - docker.io
+  - ghcr.io

@@ -1,0 +1,64 @@
+# One-shot install Job — downloads game files into the PVC.
+# Idempotent: re-applying re-validates and patches changed files,
+# so this Job is also the update path.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: starrupture-install
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+
+      # Match the steam user inside the image (UID 1000, GID 1001).
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1001
+        fsGroup: 1001
+
+      initContainers:
+        - name: fix-permissions
+          image: busybox:1.36
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              chown -R 1000:1001 /mnt/steam
+              chmod -R 775 /mnt/steam
+          volumeMounts:
+            - name: data
+              mountPath: /mnt/steam
+
+      containers:
+        - name: install
+          image: ghcr.io/steam-dedicated-server/starrupture-docker:latest
+          imagePullPolicy: Always
+          args: ["install"]
+          securityContext:
+            seccompProfile: { type: Unconfined }
+          env:
+            # Anonymous downloads frequently fail the first attempt;
+            # the wrapper retries with backoff. Bump for slower nodes.
+            - name: DOWNLOAD_MAX_ATTEMPTS
+              value: "10"
+          envFrom:
+            - secretRef:
+                name: starrupture-config
+          volumeMounts:
+            - name: data
+              mountPath: /mnt/steam
+          resources:
+            # Install is mostly I/O bound — small CPU footprint, but
+            # the Wine prefix bootstrap on first run wants some RAM.
+            requests: { cpu: "500m", memory: "1Gi" }
+            limits:   { cpu: "2",    memory: "3Gi" }
+
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: starrupture-data

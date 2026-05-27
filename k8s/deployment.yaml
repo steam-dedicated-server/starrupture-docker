@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: starrupture-server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate                       # PVC is RWO + hostPort claim; never run two pods
+  selector:
+    matchLabels:
+      app: starrupture-server
+  template:
+    metadata:
+      labels:
+        app: starrupture-server
+    spec:
+      # Optional: pin to a specific node when running multiple
+      # shards across a cluster. Drop or change the value.
+      # nodeSelector:
+      #   starrupture: starrupture-server
+
+      hostNetwork: true                  # game ports come straight off the node IP
+      dnsPolicy: ClusterFirstWithHostNet
+      terminationGracePeriodSeconds: 60  # let the server flush saves on SIGTERM
+
+      # Match the image's `steam` user (UID 1000, GID 1001).
+      # fsGroup must live at pod level — not on the container.
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1001
+        fsGroup: 1001
+
+      initContainers:
+        # PVCs are often provisioned root-owned; fix that before the
+        # main container starts so steamcmd / Wine can write.
+        - name: fix-permissions
+          image: busybox:1.36
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              mkdir -p /mnt/steam/backups
+              chown -R 1000:1001 /mnt/steam
+              chmod -R 775 /mnt/steam
+          volumeMounts:
+            - name: data
+              mountPath: /mnt/steam
+
+      containers:
+        - name: server
+          image: ghcr.io/steam-dedicated-server/starrupture-docker:latest
+          imagePullPolicy: Always
+          args: ["run"]
+          envFrom:
+            - secretRef:
+                name: starrupture-config
+          ports:
+            - { name: game,     containerPort: 7777,  protocol: UDP, hostPort: 7777 }
+            - { name: game-tcp, containerPort: 7777,  protocol: TCP, hostPort: 7777 }
+            - { name: query,    containerPort: 27015, protocol: UDP, hostPort: 27015 }
+          resources:
+            # UE5 + Wine baseline. Increase if your shard runs hot.
+            requests: { cpu: "2",   memory: "6Gi" }
+            limits:   { cpu: "4",   memory: "12Gi" }
+          securityContext:
+            seccompProfile: { type: Unconfined }
+            # SYS_NICE lets the entry-point renice the server thread
+            # to -5 so the game wins scheduler conflicts on busy
+            # nodes. Without it the renice silently no-ops.
+            capabilities:
+              add: ["SYS_NICE"]
+          startupProbe:
+            # Wine prefix init + UE5 cold start can be slow.
+            # 50 * 10s = 500s grace before liveness takes over.
+            exec: { command: ["python3", "/opt/starrupture/healthcheck.py"] }
+            failureThreshold: 50
+            periodSeconds: 10
+          livenessProbe:
+            exec: { command: ["python3", "/opt/starrupture/healthcheck.py"] }
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec: { command: ["python3", "/opt/starrupture/healthcheck.py"] }
+            periodSeconds: 15
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: data
+              mountPath: /mnt/steam
+
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: starrupture-data
